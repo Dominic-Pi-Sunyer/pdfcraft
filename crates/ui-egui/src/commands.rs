@@ -84,6 +84,14 @@ impl PdfCraftApp {
         if self.combine_showing() && matches!(spec.needs, commands::Needs::Undo | commands::Needs::Redo) {
             return self.combine_can_undo(spec.needs == commands::Needs::Undo);
         }
+        if !self.local_editing_allowed()
+            && !matches!(
+                spec.needs,
+                commands::Needs::Nothing | commands::Needs::Document | commands::Needs::Copying | commands::Needs::TwoPageView
+            )
+        {
+            return false;
+        }
         commands::is_enabled(spec, &self.session, self.active_ids().map(|(_, id)| id))
             && (spec.id != "edit.copy"
                 || self.active.and_then(|i| self.views.get(i)).is_some_and(|v| !v.organize && v.selected_text().is_some_and(|t| !t.is_empty())))

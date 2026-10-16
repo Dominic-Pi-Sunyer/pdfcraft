@@ -2681,3 +2681,12 @@ key	Space	Space
 	Words	Từ
 	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” đã thay đổi trên đĩa sau khi được mở hoặc lưu lần cuối. Lưu lúc này sẽ thay thế phiên bản mới hơn đó bằng phiên bản này.
 @id	file.word_count	Đếm từ…
+	Share Document	Chia sẻ tài liệu
+	Join via Link	Tham gia qua liên kết
+	Copy Edit Link	Sao chép liên kết chỉnh sửa
+	Copy View-Only Link	Sao chép liên kết chỉ xem
+	Stop Sharing	Dừng chia sẻ
+	Leave	Rời khỏi
+	Edit link copied to clipboard	Đã sao chép liên kết chỉnh sửa vào bộ nhớ tạm
+	View-only link copied to clipboard	Đã sao chép liên kết chỉ xem vào bộ nhớ tạm
+	No document data to share	Không có dữ liệu tài liệu để chia sẻ

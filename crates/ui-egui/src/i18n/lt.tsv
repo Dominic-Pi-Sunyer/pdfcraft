@@ -2679,3 +2679,12 @@ key	Space	Tarpas
 	The password must have at least 6 characters.	Slaptažodį turi sudaryti bent 6 simboliai.
 	This file changed on disk. Reload it to see the new version; your unsaved changes will be lost.	Šis failas diske pasikeitė. Įkelkite jį iš naujo, kad pamatytumėte naują versiją; neįrašyti pakeitimai bus prarasti.
 theme	Appearance	Išvaizda
+	Share Document	Bendrinti dokumentą
+	Join via Link	Prisijungti per nuorodą
+	Copy Edit Link	Kopijuoti redagavimo nuorodą
+	Copy View-Only Link	Kopijuoti nuorodą tik peržiūrai
+	Stop Sharing	Nustoti bendrinti
+	Leave	Išeiti
+	Edit link copied to clipboard	Redagavimo nuoroda nukopijuota į iškarpinę
+	View-only link copied to clipboard	Nuoroda tik peržiūrai nukopijuota į iškarpinę
+	No document data to share	Nėra dokumento duomenų bendrinimui
