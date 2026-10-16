@@ -20,7 +20,7 @@ use crate::{EditError, MarkKind, check, contents, matrix_number, n, page_list, p
 
 const TAG: &str = "Added";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Family {
     #[default]
     Helvetica,
@@ -94,7 +94,7 @@ impl Family {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Align {
     #[default]
     Left,
@@ -104,7 +104,7 @@ pub enum Align {
     Justify,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AddedText {
     /// The text box in display space; its width wraps the text and its top is the first line's
     /// top. The height follows the text.

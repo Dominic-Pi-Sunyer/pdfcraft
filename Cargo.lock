@@ -5922,6 +5922,7 @@ dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
  "pdfcraft-model",
+ "serde",
  "thiserror 2.0.21",
  "unicode-bidi",
 ]
@@ -5959,6 +5960,7 @@ dependencies = [
  "pdfcraft-xfa",
  "pdfcraft-xfdf",
  "png 0.18.1",
+ "serde",
  "thiserror 2.0.21",
  "unicode-segmentation",
  "url",

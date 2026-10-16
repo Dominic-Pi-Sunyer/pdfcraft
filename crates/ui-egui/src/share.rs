@@ -49,6 +49,28 @@ pub enum DocMutation {
     MarkAnnotation { page: usize, index: usize, marked: bool, author: String },
     /// A form field's value (text, check box, radio group, choice).
     SetFieldValue { name: String, value: pdfcraft_engine::FieldValue },
+    /// Edit a line of the page's own text.
+    EditTextLine { page: usize, line: usize, text: String },
+    /// Rewrite a paragraph of the page's own text, with its formatting.
+    EditTextBlock { page: usize, block: usize, text: String, style: pdfcraft_engine::BlockStyle },
+    /// Delete an added item, a text run or an image from the page content.
+    DeleteContent { page: usize, index: usize },
+    AddText { page: usize, text: pdfcraft_engine::AddedText },
+    UpdateText { page: usize, index: usize, text: pdfcraft_engine::AddedText },
+    MoveObjects { page: usize, objects: Vec<pdfcraft_engine::ObjectTarget>, offset: [f64; 2] },
+    /// Suggest replacing marked text: strike-through plus a caret note.
+    ReplaceText {
+        page: usize,
+        quads: Vec<[f64; 8]>,
+        text: String,
+        author: String,
+        strike: pdfcraft_engine::Style,
+        caret: pdfcraft_engine::Style,
+    },
+    EraseInk { page: usize, index: usize, path: Vec<[f64; 2]>, radius: f64 },
+    AddImage { page: usize, rect: Option<[f64; 4]>, name: String, bytes: Vec<u8> },
+    ReplaceImage { page: usize, index: usize, name: String, bytes: Vec<u8> },
+    EditPageImage { page: usize, index: usize, change: pdfcraft_engine::ImageEdit },
 }
 
 /// Alias for [`DocMutation`] following the simple-sync recipe conventions.
@@ -89,6 +111,25 @@ impl DocMutation {
                 Edit::MarkAnnotation { page, index, marked, author }
             }
             DocMutation::SetFieldValue { name, value } => Edit::SetFieldValue { name, value },
+            DocMutation::EditTextLine { page, line, text } => Edit::EditTextLine { page, line, text },
+            DocMutation::EditTextBlock { page, block, text, style } => Edit::EditTextBlock { page, block, text, style },
+            DocMutation::DeleteContent { page, index } => Edit::DeleteContent { page, index },
+            DocMutation::AddText { page, text } => Edit::AddText { page, text },
+            DocMutation::UpdateText { page, index, text } => {
+                Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(text) }
+            }
+            DocMutation::MoveObjects { page, objects, offset } => Edit::MoveObjects { page, objects, offset },
+            DocMutation::ReplaceText { page, quads, text, author, strike, caret } => {
+                Edit::ReplaceText { page, quads, text, author, strike, caret }
+            }
+            DocMutation::EraseInk { page, index, path, radius } => Edit::EraseInk { page, index, path, radius },
+            DocMutation::AddImage { page, rect, name, bytes } => {
+                Edit::AddImage { page, rect, name, bytes: std::sync::Arc::new(bytes) }
+            }
+            DocMutation::ReplaceImage { page, index, name, bytes } => {
+                Edit::ReplaceImage { page, index, name, bytes: std::sync::Arc::new(bytes) }
+            }
+            DocMutation::EditPageImage { page, index, change } => Edit::EditPageImage { page, index, change },
         }
     }
 
@@ -132,6 +173,26 @@ impl DocMutation {
                 DocMutation::MarkAnnotation { page, index, marked, author }
             }
             Edit::SetFieldValue { name, value } => DocMutation::SetFieldValue { name, value },
+            Edit::EditTextLine { page, line, text } => DocMutation::EditTextLine { page, line, text },
+            Edit::EditTextBlock { page, block, text, style } => DocMutation::EditTextBlock { page, block, text, style },
+            Edit::DeleteContent { page, index } => DocMutation::DeleteContent { page, index },
+            Edit::AddText { page, text } => DocMutation::AddText { page, text },
+            // An added picture points at an object number in this peer's copy of the file.
+            Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(text) } => {
+                DocMutation::UpdateText { page, index, text }
+            }
+            Edit::MoveObjects { page, objects, offset } => DocMutation::MoveObjects { page, objects, offset },
+            Edit::ReplaceText { page, quads, text, author, strike, caret } => {
+                DocMutation::ReplaceText { page, quads, text, author, strike, caret }
+            }
+            Edit::EraseInk { page, index, path, radius } => DocMutation::EraseInk { page, index, path, radius },
+            Edit::AddImage { page, rect, name, bytes } => {
+                DocMutation::AddImage { page, rect, name, bytes: bytes.as_ref().clone() }
+            }
+            Edit::ReplaceImage { page, index, name, bytes } => {
+                DocMutation::ReplaceImage { page, index, name, bytes: bytes.as_ref().clone() }
+            }
+            Edit::EditPageImage { page, index, change } => DocMutation::EditPageImage { page, index, change },
             _ => return None,
         })
     }
