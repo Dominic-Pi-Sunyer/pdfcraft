@@ -46,8 +46,23 @@ pub enum AnnotError {
 
 pub type Rgb = [f64; 3];
 
+/// `ObjRef` as a `(number, generation)` pair, so the cos crate needs no serde of its own.
+mod objref_serde {
+    use super::ObjRef;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(r: &ObjRef, s: S) -> Result<S::Ok, S::Error> {
+        (r.num, r.generation).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ObjRef, D::Error> {
+        let (num, generation) = <(u32, u16)>::deserialize(d)?;
+        Ok(ObjRef { num, generation })
+    }
+}
+
 /// Text markup kinds (§12.5.6.10).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Markup {
     Highlight,
     Underline,
@@ -67,7 +82,7 @@ impl Markup {
 }
 
 /// The standard text-annotation icon names (§12.5.6.4, Table 175).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum NoteIcon {
     #[default]
     Comment,
@@ -98,7 +113,7 @@ impl NoteIcon {
 }
 
 /// Fill & Sign marks (Acrobat's ✓, ✕, ●, ─).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FillMark {
     Check,
     Cross,
@@ -128,7 +143,7 @@ impl FillMark {
 }
 
 /// The stamps of Acrobat's stamp palette (drawn in PdfCraft's own style).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StampKind {
     // Standard business.
     Approved,
@@ -281,7 +296,7 @@ impl StampKind {
 }
 
 /// A line ending (`/LE`): the ten styles in ISO 32000-2 Table 217.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LineEnding {
     None,
     Square,
@@ -330,7 +345,7 @@ impl LineEnding {
 }
 
 /// Geometry of a new comment, in PDF user space of its page.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Shape {
     /// A sticky note whose icon's top-left corner is at `at`.
     Note {
@@ -396,6 +411,7 @@ pub enum Shape {
     CustomStamp {
         rect: [f64; 4],
         name: String,
+        #[serde(with = "objref_serde")]
         picture: ObjRef,
         image: bool,
         size: (f64, f64),
@@ -443,7 +459,7 @@ pub enum Shape {
 }
 
 /// The standard file attachment icons (§12.5.6.15).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AttachIcon {
     #[default]
     PushPin,
@@ -495,7 +511,7 @@ impl Shape {
 }
 
 /// The standard fonts of redaction overlay text.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OverlayFont {
     #[default]
     Helvetica,
@@ -533,7 +549,7 @@ impl OverlayFont {
 }
 
 /// How redaction overlay text is drawn (Redaction Properties ▸ Appearance).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OverlayLook {
     pub font: OverlayFont,
     /// Points; 0 = auto-size to fit the area.
@@ -552,7 +568,7 @@ impl Default for OverlayLook {
 }
 
 /// How a comment looks.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Style {
     /// Stroke colour (text colour for text boxes, icon colour for notes).
     pub color: Rgb,
@@ -599,7 +615,7 @@ impl Style {
 }
 
 /// A comment to add.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct NewAnnotation {
     /// 0-based page index.
     pub page: usize,
@@ -620,7 +636,7 @@ pub struct Meta {
 }
 
 /// Review states a reply can set (§12.5.6.3, Table 172; Acrobat's "Set status").
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ReviewState {
     None,
     Accepted,

@@ -192,7 +192,7 @@ impl Field {
 }
 
 /// A value to put in a field.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum FieldValue {
     Text(String),
     /// Check box: checked or not.

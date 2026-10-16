@@ -5806,6 +5806,7 @@ dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
  "pdfcraft-model",
+ "serde",
  "thiserror 2.0.21",
 ]
 
@@ -5999,6 +6000,7 @@ dependencies = [
  "pdfcraft-cos",
  "pdfcraft-fonts",
  "pdfcraft-model",
+ "serde",
  "thiserror 2.0.21",
 ]
 

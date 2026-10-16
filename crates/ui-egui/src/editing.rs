@@ -50,8 +50,15 @@ impl PdfCraftApp {
             // Apply the edit exactly as given; the serialized form is only what peers receive.
             let mutation = crate::share::DocMutation::from_edit(&edit);
             let ok = self.apply_edit_internal(edit);
-            if ok && let Some(mutation) = mutation {
-                self.broadcast_mutation(&mutation);
+            if ok && self.active_is_shared() {
+                match mutation {
+                    Some(mutation) => self.broadcast_mutation(&mutation),
+                    // Applied here only: say so, rather than let it look shared.
+                    None if self.sync.as_ref().is_some_and(|s| s.role() != simple_sync::ShareRole::Offline) => {
+                        self.notify(tl!("This change isn't shared live yet"));
+                    }
+                    None => {}
+                }
             }
             return ok;
         }
@@ -67,7 +74,7 @@ impl PdfCraftApp {
             return false;
         }
         let ok = self.apply_edit_internal(mutation.to_edit());
-        if ok {
+        if ok && self.active_is_shared() {
             self.broadcast_mutation(&mutation);
         }
         ok
@@ -87,8 +94,17 @@ impl PdfCraftApp {
     /// Peer-initiated mutation: apply locally WITHOUT broadcasting (prevents echo loops).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn apply_remote_mutation(&mut self, mutation: crate::share::DocMutation) -> bool {
-        let edit = mutation.to_edit();
-        self.apply_edit_internal(edit)
+        // A peer's edit is about the shared document, not whichever tab is showing now.
+        let Some(shared) = self.shared_doc else { return false };
+        let Some(view) = self.views.iter().position(|v| v.id == shared) else {
+            log::warn!("remote edit dropped: the shared document is no longer open");
+            return false;
+        };
+        let was_active = self.active;
+        self.active = Some(view);
+        let ok = self.apply_edit_internal(mutation.to_edit());
+        self.active = was_active;
+        ok
     }
 
     pub(crate) fn apply_edit_internal(&mut self, edit: Edit) -> bool {
