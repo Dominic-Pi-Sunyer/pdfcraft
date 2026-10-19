@@ -583,6 +583,13 @@ pub struct PdfCraftApp {
     open_worker: Option<open_worker::OpenWorker>,
     #[cfg(not(target_arch = "wasm32"))]
     pub sync: Option<simple_sync::SyncEngine>,
+    /// The document a Share Mode session is about: edits made to it are sent to peers, and
+    /// peers' edits are applied to it whichever tab is showing.
+    #[cfg(not(target_arch = "wasm32"))]
+    shared_doc: Option<DocId>,
+    /// A share/join that is starting on its own thread (`sync` is `None` until it returns).
+    #[cfg(not(target_arch = "wasm32"))]
+    share_pending: Option<std::sync::mpsc::Receiver<share::ShareOutcome>>,
     #[cfg(not(target_arch = "wasm32"))]
     pub share_toolbar: share::ShareToolbar,
     #[cfg(not(target_arch = "wasm32"))]
@@ -946,6 +953,10 @@ impl PdfCraftApp {
             open_worker: None,
             #[cfg(not(target_arch = "wasm32"))]
             sync: simple_sync::SyncEngine::new("pdfcraft").ok(),
+            #[cfg(not(target_arch = "wasm32"))]
+            share_pending: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            shared_doc: None,
             #[cfg(not(target_arch = "wasm32"))]
             share_toolbar: share::ShareToolbar::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -2009,6 +2020,7 @@ impl PdfCraftApp {
     pub fn pump_sync(&mut self, ctx: Option<&egui::Context>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            self.poll_share_start(ctx);
             let mut events = Vec::new();
             if let Some(sync) = &mut self.sync {
                 while let Some(ev) = sync.poll() {
@@ -2019,9 +2031,12 @@ impl PdfCraftApp {
             for ev in events {
                 match ev {
                     simple_sync::SyncEvent::BaseDocumentReady { filename, bytes } => {
-                        if let Err(e) = self.open_bytes(&filename, None, bytes) {
-                            log::warn!("couldn't open shared document {filename}: {e}");
-                            self.share_toolbar.error = Some(format!("open document: {e}"));
+                        match self.open_bytes(&filename, None, bytes) {
+                            Ok(()) => self.shared_doc = self.active_ids().map(|(_, id)| id),
+                            Err(e) => {
+                                log::warn!("couldn't open shared document {filename}: {e}");
+                                self.share_toolbar.error = Some(format!("open document: {e}"));
+                            }
                         }
                     }
                     simple_sync::SyncEvent::RemoteMutation { mutation_bytes, .. } => {
@@ -2051,8 +2066,121 @@ impl PdfCraftApp {
         }
     }
 
-    /// Whether local edits are allowed (false if in a View-Only P2P Share session).
+    /// Whether the active tab is the document being shared.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn active_is_shared(&self) -> bool {
+        self.shared_doc.is_some() && self.active_ids().map(|(_, id)| id) == self.shared_doc
+    }
+
+    /// The document a Share Mode session is about, whichever tab is showing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn shared_document(&self) -> Option<&pdfcraft_engine::Document> {
+        self.shared_doc.and_then(|id| self.session.get(id))
+    }
+
+    /// Forget which document was shared (sharing stopped or the session was left).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn clear_shared_doc(&mut self) {
+        self.shared_doc = None;
+    }
+
+    /// Whether a share/join is still starting.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn share_pending_now(&self) -> bool {
+        self.share_pending.is_some()
+    }
+
+    /// Start sharing the document on a worker thread: opening the network endpoint can take
+    /// seconds, and the window must not freeze meanwhile.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_share(&mut self, filename: String, bytes: Vec<u8>) {
+        self.shared_doc = self.active_ids().map(|(_, id)| id);
+        self.begin_share_job(move |mut engine| {
+            let result = engine.enable_share_mode(&filename, bytes).map(share::Started::Hosting);
+            share::ShareOutcome { engine, result: result.map_err(|e| e.to_string()) }
+        });
+    }
+
+    /// Join a session on a worker thread (see [`Self::begin_share`]).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_join(&mut self, ticket: String) {
+        self.begin_share_job(move |mut engine| {
+            let result = engine.join_via_ticket(&ticket).map(|_| share::Started::Joined);
+            share::ShareOutcome { engine, result: result.map_err(|e| e.to_string()) }
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn begin_share_job(&mut self, job: impl FnOnce(simple_sync::SyncEngine) -> share::ShareOutcome + Send + 'static) {
+        if self.share_pending.is_some() {
+            return;
+        }
+        let Some(engine) = self.sync.take() else {
+            self.share_toolbar.error = Some("P2P sync is unavailable".to_string());
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new().name("share-start".into()).spawn(move || {
+            let _ = tx.send(job(engine));
+        });
+        match spawned {
+            Ok(_) => {
+                self.share_toolbar.error = None;
+                self.share_pending = Some(rx);
+            }
+            Err(e) => {
+                // The engine went with the closure; make a fresh one so Share Mode still works.
+                self.sync = simple_sync::SyncEngine::new("pdfcraft").ok();
+                self.share_toolbar.error = Some(format!("couldn't start sharing: {e}"));
+            }
+        }
+    }
+
+    /// Take back the engine from a finished share/join thread and show its result.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_share_start(&mut self, ctx: Option<&egui::Context>) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(rx) = &self.share_pending else { return };
+        match rx.try_recv() {
+            Ok(out) => {
+                self.share_pending = None;
+                self.sync = Some(out.engine);
+                match out.result {
+                    Ok(share::Started::Hosting(links)) => {
+                        self.share_toolbar.links = Some(links);
+                        self.share_toolbar.error = None;
+                    }
+                    Ok(share::Started::Joined) => {
+                        self.share_toolbar.join_input.clear();
+                        self.share_toolbar.error = None;
+                    }
+                    Err(e) => self.share_toolbar.error = Some(e),
+                }
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint();
+                }
+            }
+            Err(TryRecvError::Empty) => {
+                // Keep frames coming so the result is picked up without user input.
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                }
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.share_pending = None;
+                self.sync = simple_sync::SyncEngine::new("pdfcraft").ok();
+                self.share_toolbar.error = Some("sharing stopped unexpectedly".to_string());
+            }
+        }
+    }
+
+    /// Whether local edits are allowed (false in a View-Only session, and while Share Mode is
+    /// still starting: an edit made then would be in neither the shared file nor the edit log).
     pub fn local_editing_allowed(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.share_pending.is_some() {
+            return false;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(sync) = &self.sync {
             return sync.role() != simple_sync::ShareRole::JoinedViewOnly;
@@ -2071,6 +2199,7 @@ impl PdfCraftApp {
     pub fn enable_share_mode(&mut self, filename: &str, base_bytes: Vec<u8>) -> Result<simple_sync::ShareLinks, String> {
         let sync = self.sync.as_mut().ok_or_else(|| "P2P sync is unavailable".to_string())?;
         let links = sync.enable_share_mode(filename, base_bytes).map_err(|e| e.to_string())?;
+        self.shared_doc = self.active_ids().map(|(_, id)| id);
         self.share_toolbar.links = Some(links.clone());
         self.share_toolbar.error = None;
         Ok(links)
@@ -2081,6 +2210,7 @@ impl PdfCraftApp {
     pub fn disable_share_mode(&mut self) -> Result<(), String> {
         let sync = self.sync.as_mut().ok_or_else(|| "P2P sync is unavailable".to_string())?;
         sync.disable_share_mode().map_err(|e| e.to_string())?;
+        self.shared_doc = None;
         self.share_toolbar.links = None;
         self.share_toolbar.error = None;
         Ok(())

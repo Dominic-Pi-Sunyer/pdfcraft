@@ -167,3 +167,141 @@ fn test_p2p_share_mode_kill_switch() {
     assert_eq!(host.share_role(), ShareRole::Offline);
     assert!(host.share_toolbar.links.is_none());
 }
+
+/// A peer who joins after edits were made must end up with the same document as everyone else,
+/// not the bytes that were shared when Share Mode started.
+#[test]
+fn test_p2p_late_joiner_receives_earlier_edits() {
+    let mut host = PdfCraftApp::new();
+    host.sync = Some(SyncEngine::with_config("test-late-host", SyncConfig::local_only()).unwrap());
+    let mut late = PdfCraftApp::new();
+    late.sync = Some(SyncEngine::with_config("test-late-joiner", SyncConfig::local_only()).unwrap());
+
+    let pdf = fixture(3);
+    host.open_bytes("late.pdf", None, pdf.clone()).expect("host opens fixture");
+    let links = host.enable_share_mode("late.pdf", pdf).expect("enable share mode");
+
+    // Edits made while nobody else is connected yet.
+    assert!(host.apply_local_mutation(DocMutation::RotatePages { pages: vec![0], degrees: 90 }));
+    assert!(host.apply_local_mutation(DocMutation::RotatePages { pages: vec![2], degrees: 180 }));
+
+    late.join_session(&links.edit_uri).expect("late joiner connects");
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        host.pump_sync(None);
+        late.pump_sync(None);
+        if let Some(doc) = late.active_document() {
+            let pages = &doc.info.pages;
+            if pages.len() == 3 && pages[0].rotation == 90 && pages[2].rotation == 180 {
+                break;
+            }
+        }
+        assert!(Instant::now() < deadline, "late joiner never caught up with the host's earlier edits");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(late.active_document().unwrap().info.pages[1].rotation, 0);
+}
+
+/// Highlights, shapes and other annotations are shared, and so are changes to them.
+#[test]
+fn test_p2p_annotation_edits_sync() {
+    use pdfcraft_engine::{Edit, NewAnnotation, Shape, Style};
+
+    let mut host = PdfCraftApp::new();
+    host.sync = Some(SyncEngine::with_config("test-annot-host", SyncConfig::local_only()).unwrap());
+    let mut peer = PdfCraftApp::new();
+    peer.sync = Some(SyncEngine::with_config("test-annot-peer", SyncConfig::local_only()).unwrap());
+
+    let pdf = fixture(1);
+    host.open_bytes("annot.pdf", None, pdf.clone()).unwrap();
+    let links = host.enable_share_mode("annot.pdf", pdf).unwrap();
+    peer.join_session(&links.edit_uri).unwrap();
+
+    let pump_until = |host: &mut PdfCraftApp, peer: &mut PdfCraftApp, what: &str, done: &dyn Fn(&PdfCraftApp) -> bool| {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !done(peer) {
+            host.pump_sync(None);
+            peer.pump_sync(None);
+            assert!(Instant::now() < deadline, "timed out: {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    pump_until(&mut host, &mut peer, "base document", &|p| p.active_document().is_some());
+
+    let shape = Shape::Rectangle { rect: [20.0, 20.0, 120.0, 90.0] };
+    let style = Style::default_for(&shape);
+    assert!(host.apply_edit(Edit::AddAnnotation(NewAnnotation {
+        page: 0,
+        shape,
+        style,
+        contents: "check this".into(),
+        author: "Host".into(),
+    })));
+    pump_until(&mut host, &mut peer, "annotation added", &|p| {
+        p.active_document().is_some_and(|d| d.info.annotations.len() == 1)
+    });
+    assert_eq!(peer.active_document().unwrap().info.annotations[0].contents.as_deref(), Some("check this"));
+
+    // The note keeps the position it was placed at (it must not be reset by the sharing path).
+    let placed = host.active_document().unwrap().info.annotations[0].rect;
+    assert_eq!(peer.active_document().unwrap().info.annotations[0].rect, placed);
+
+    assert!(host.apply_edit(Edit::MoveAnnotation { page: 0, index: 0, dx: 30.0, dy: 0.0 }));
+    let moved = host.active_document().unwrap().info.annotations[0].rect;
+    assert_ne!(moved, placed);
+    pump_until(&mut host, &mut peer, "annotation moved", &|p| {
+        p.active_document().is_some_and(|d| d.info.annotations[0].rect == moved)
+    });
+
+    assert!(host.apply_edit(Edit::DeleteAnnotation { page: 0, index: 0 }));
+    pump_until(&mut host, &mut peer, "annotation deleted", &|p| {
+        p.active_document().is_some_and(|d| d.info.annotations.is_empty())
+    });
+}
+
+/// A peer's edit goes to the shared document even when another tab is showing, and an edit made
+/// in that other tab is not sent to the peers at all.
+#[test]
+fn test_p2p_edits_follow_the_shared_document_not_the_active_tab() {
+    let mut host = PdfCraftApp::new();
+    host.sync = Some(SyncEngine::with_config("test-tab-host", SyncConfig::local_only()).unwrap());
+    let mut peer = PdfCraftApp::new();
+    peer.sync = Some(SyncEngine::with_config("test-tab-peer", SyncConfig::local_only()).unwrap());
+
+    let pdf = fixture(2);
+    host.open_bytes("shared.pdf", None, pdf.clone()).unwrap();
+    let links = host.enable_share_mode("shared.pdf", pdf).unwrap();
+    peer.join_session(&links.edit_uri).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while peer.shared_document().is_none() {
+        host.pump_sync(None);
+        peer.pump_sync(None);
+        assert!(Instant::now() < deadline, "peer never received the document");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    // The peer opens another document: it is now the active tab.
+    peer.open_bytes("other.pdf", None, fixture(2)).unwrap();
+    assert!(!peer.active_is_shared());
+    // The host does the same and edits that other document: nothing may be sent.
+    host.open_bytes("scratch.pdf", None, fixture(2)).unwrap();
+    assert!(!host.active_is_shared());
+    assert!(host.apply_local_mutation(DocMutation::RotatePages { pages: vec![1], degrees: 90 }));
+
+    // An edit to the shared document, made after switching the host back to it.
+    host.active = Some(0);
+    assert!(host.active_is_shared());
+    assert!(host.apply_local_mutation(DocMutation::RotatePages { pages: vec![0], degrees: 180 }));
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while peer.shared_document().unwrap().info.pages[0].rotation != 180 {
+        host.pump_sync(None);
+        peer.pump_sync(None);
+        assert!(Instant::now() < deadline, "peer never received the edit");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    // The edit landed on the shared document, not on the tab the peer had in front.
+    assert_eq!(peer.shared_document().unwrap().info.pages[1].rotation, 0, "the scratch edit was not shared");
+    assert_eq!(peer.active_document().unwrap().info.pages[0].rotation, 0, "the other tab is untouched");
+}
