@@ -14,20 +14,63 @@ use crate::PdfCraftApp;
 /// peer applies the same mutations in the order they arrive.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum DocMutation {
-    RotatePages { pages: Vec<usize>, degrees: i64 },
-    DeletePages { pages: Vec<usize> },
-    MovePages { pages: Vec<usize>, to: usize },
-    InsertBlankPage { at: usize, width: f64, height: f64 },
-    DuplicatePages { pages: Vec<usize> },
-    SetInfo { key: String, value: String },
+    RotatePages {
+        pages: Vec<usize>,
+        degrees: i64,
+    },
+    DeletePages {
+        pages: Vec<usize>,
+    },
+    MovePages {
+        pages: Vec<usize>,
+        to: usize,
+    },
+    InsertBlankPage {
+        at: usize,
+        width: f64,
+        height: f64,
+    },
+    DuplicatePages {
+        pages: Vec<usize>,
+    },
+    SetInfo {
+        key: String,
+        value: String,
+    },
     /// Any new annotation: notes, highlights, shapes, ink, text boxes, stamps, signatures.
     AddAnnotation(pdfcraft_engine::NewAnnotation),
-    SetAnnotationContents { page: usize, index: usize, text: String },
-    DeleteAnnotation { page: usize, index: usize },
-    ReplyToAnnotation { page: usize, index: usize, text: String, author: String },
-    SetAnnotationStatus { page: usize, index: usize, state: pdfcraft_engine::ReviewState, author: String },
-    MoveAnnotation { page: usize, index: usize, dx: f64, dy: f64 },
-    ResizeAnnotation { page: usize, index: usize, rect: [f64; 4] },
+    SetAnnotationContents {
+        page: usize,
+        index: usize,
+        text: String,
+    },
+    DeleteAnnotation {
+        page: usize,
+        index: usize,
+    },
+    ReplyToAnnotation {
+        page: usize,
+        index: usize,
+        text: String,
+        author: String,
+    },
+    SetAnnotationStatus {
+        page: usize,
+        index: usize,
+        state: pdfcraft_engine::ReviewState,
+        author: String,
+    },
+    MoveAnnotation {
+        page: usize,
+        index: usize,
+        dx: f64,
+        dy: f64,
+    },
+    ResizeAnnotation {
+        page: usize,
+        index: usize,
+        rect: [f64; 4],
+    },
     StyleAnnotation {
         page: usize,
         index: usize,
@@ -36,8 +79,16 @@ pub enum DocMutation {
         width: Option<f64>,
         endings: Option<Vec<pdfcraft_engine::LineEnding>>,
     },
-    FillAnnotation { page: usize, index: usize, fill: Option<pdfcraft_engine::Rgb> },
-    FontSizeAnnotation { page: usize, index: usize, size: f64 },
+    FillAnnotation {
+        page: usize,
+        index: usize,
+        fill: Option<pdfcraft_engine::Rgb>,
+    },
+    FontSizeAnnotation {
+        page: usize,
+        index: usize,
+        size: f64,
+    },
     SetAnnotationInfo {
         page: usize,
         index: usize,
@@ -45,10 +96,86 @@ pub enum DocMutation {
         subject: Option<String>,
         icon: Option<pdfcraft_engine::NoteIcon>,
     },
-    LockAnnotation { page: usize, index: usize, locked: bool },
-    MarkAnnotation { page: usize, index: usize, marked: bool, author: String },
+    LockAnnotation {
+        page: usize,
+        index: usize,
+        locked: bool,
+    },
+    MarkAnnotation {
+        page: usize,
+        index: usize,
+        marked: bool,
+        author: String,
+    },
     /// A form field's value (text, check box, radio group, choice).
-    SetFieldValue { name: String, value: pdfcraft_engine::FieldValue },
+    SetFieldValue {
+        name: String,
+        value: pdfcraft_engine::FieldValue,
+    },
+    /// Edit a line of the page's own text.
+    EditTextLine {
+        page: usize,
+        line: usize,
+        text: String,
+    },
+    /// Rewrite a paragraph of the page's own text, with its formatting.
+    EditTextBlock {
+        page: usize,
+        block: usize,
+        text: String,
+        style: pdfcraft_engine::BlockStyle,
+    },
+    /// Delete an added item, a text run or an image from the page content.
+    DeleteContent {
+        page: usize,
+        index: usize,
+    },
+    AddText {
+        page: usize,
+        text: pdfcraft_engine::AddedText,
+    },
+    UpdateText {
+        page: usize,
+        index: usize,
+        text: pdfcraft_engine::AddedText,
+    },
+    MoveObjects {
+        page: usize,
+        objects: Vec<pdfcraft_engine::ObjectTarget>,
+        offset: [f64; 2],
+    },
+    /// Suggest replacing marked text: strike-through plus a caret note.
+    ReplaceText {
+        page: usize,
+        quads: Vec<[f64; 8]>,
+        text: String,
+        author: String,
+        strike: pdfcraft_engine::Style,
+        caret: pdfcraft_engine::Style,
+    },
+    EraseInk {
+        page: usize,
+        index: usize,
+        path: Vec<[f64; 2]>,
+        radius: f64,
+    },
+    AddImage {
+        page: usize,
+        rect: Option<[f64; 4]>,
+        name: String,
+        bytes: Vec<u8>,
+    },
+    ReplaceImage {
+        page: usize,
+        index: usize,
+        name: String,
+        bytes: Vec<u8>,
+    },
+    EditPageImage {
+        page: usize,
+        index: usize,
+        change: pdfcraft_engine::ImageEdit,
+    },
 }
 
 /// Alias for [`DocMutation`] following the simple-sync recipe conventions.
@@ -68,12 +195,8 @@ impl DocMutation {
             DocMutation::AddAnnotation(a) => Edit::AddAnnotation(a),
             DocMutation::SetAnnotationContents { page, index, text } => Edit::SetAnnotationContents { page, index, text },
             DocMutation::DeleteAnnotation { page, index } => Edit::DeleteAnnotation { page, index },
-            DocMutation::ReplyToAnnotation { page, index, text, author } => {
-                Edit::ReplyToAnnotation { page, index, text, author }
-            }
-            DocMutation::SetAnnotationStatus { page, index, state, author } => {
-                Edit::SetAnnotationStatus { page, index, state, author }
-            }
+            DocMutation::ReplyToAnnotation { page, index, text, author } => Edit::ReplyToAnnotation { page, index, text, author },
+            DocMutation::SetAnnotationStatus { page, index, state, author } => Edit::SetAnnotationStatus { page, index, state, author },
             DocMutation::MoveAnnotation { page, index, dx, dy } => Edit::MoveAnnotation { page, index, dx, dy },
             DocMutation::ResizeAnnotation { page, index, rect } => Edit::ResizeAnnotation { page, index, rect },
             DocMutation::StyleAnnotation { page, index, color, opacity, width, endings } => {
@@ -81,14 +204,21 @@ impl DocMutation {
             }
             DocMutation::FillAnnotation { page, index, fill } => Edit::FillAnnotation { page, index, fill },
             DocMutation::FontSizeAnnotation { page, index, size } => Edit::FontSizeAnnotation { page, index, size },
-            DocMutation::SetAnnotationInfo { page, index, author, subject, icon } => {
-                Edit::SetAnnotationInfo { page, index, author, subject, icon }
-            }
+            DocMutation::SetAnnotationInfo { page, index, author, subject, icon } => Edit::SetAnnotationInfo { page, index, author, subject, icon },
             DocMutation::LockAnnotation { page, index, locked } => Edit::LockAnnotation { page, index, locked },
-            DocMutation::MarkAnnotation { page, index, marked, author } => {
-                Edit::MarkAnnotation { page, index, marked, author }
-            }
+            DocMutation::MarkAnnotation { page, index, marked, author } => Edit::MarkAnnotation { page, index, marked, author },
             DocMutation::SetFieldValue { name, value } => Edit::SetFieldValue { name, value },
+            DocMutation::EditTextLine { page, line, text } => Edit::EditTextLine { page, line, text },
+            DocMutation::EditTextBlock { page, block, text, style } => Edit::EditTextBlock { page, block, text, style },
+            DocMutation::DeleteContent { page, index } => Edit::DeleteContent { page, index },
+            DocMutation::AddText { page, text } => Edit::AddText { page, text },
+            DocMutation::UpdateText { page, index, text } => Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(text) },
+            DocMutation::MoveObjects { page, objects, offset } => Edit::MoveObjects { page, objects, offset },
+            DocMutation::ReplaceText { page, quads, text, author, strike, caret } => Edit::ReplaceText { page, quads, text, author, strike, caret },
+            DocMutation::EraseInk { page, index, path, radius } => Edit::EraseInk { page, index, path, radius },
+            DocMutation::AddImage { page, rect, name, bytes } => Edit::AddImage { page, rect, name, bytes: std::sync::Arc::new(bytes) },
+            DocMutation::ReplaceImage { page, index, name, bytes } => Edit::ReplaceImage { page, index, name, bytes: std::sync::Arc::new(bytes) },
+            DocMutation::EditPageImage { page, index, change } => Edit::EditPageImage { page, index, change },
         }
     }
 
@@ -111,12 +241,8 @@ impl DocMutation {
             Edit::AddAnnotation(a) => DocMutation::AddAnnotation(a),
             Edit::SetAnnotationContents { page, index, text } => DocMutation::SetAnnotationContents { page, index, text },
             Edit::DeleteAnnotation { page, index } => DocMutation::DeleteAnnotation { page, index },
-            Edit::ReplyToAnnotation { page, index, text, author } => {
-                DocMutation::ReplyToAnnotation { page, index, text, author }
-            }
-            Edit::SetAnnotationStatus { page, index, state, author } => {
-                DocMutation::SetAnnotationStatus { page, index, state, author }
-            }
+            Edit::ReplyToAnnotation { page, index, text, author } => DocMutation::ReplyToAnnotation { page, index, text, author },
+            Edit::SetAnnotationStatus { page, index, state, author } => DocMutation::SetAnnotationStatus { page, index, state, author },
             Edit::MoveAnnotation { page, index, dx, dy } => DocMutation::MoveAnnotation { page, index, dx, dy },
             Edit::ResizeAnnotation { page, index, rect } => DocMutation::ResizeAnnotation { page, index, rect },
             Edit::StyleAnnotation { page, index, color, opacity, width, endings } => {
@@ -124,14 +250,22 @@ impl DocMutation {
             }
             Edit::FillAnnotation { page, index, fill } => DocMutation::FillAnnotation { page, index, fill },
             Edit::FontSizeAnnotation { page, index, size } => DocMutation::FontSizeAnnotation { page, index, size },
-            Edit::SetAnnotationInfo { page, index, author, subject, icon } => {
-                DocMutation::SetAnnotationInfo { page, index, author, subject, icon }
-            }
+            Edit::SetAnnotationInfo { page, index, author, subject, icon } => DocMutation::SetAnnotationInfo { page, index, author, subject, icon },
             Edit::LockAnnotation { page, index, locked } => DocMutation::LockAnnotation { page, index, locked },
-            Edit::MarkAnnotation { page, index, marked, author } => {
-                DocMutation::MarkAnnotation { page, index, marked, author }
-            }
+            Edit::MarkAnnotation { page, index, marked, author } => DocMutation::MarkAnnotation { page, index, marked, author },
             Edit::SetFieldValue { name, value } => DocMutation::SetFieldValue { name, value },
+            Edit::EditTextLine { page, line, text } => DocMutation::EditTextLine { page, line, text },
+            Edit::EditTextBlock { page, block, text, style } => DocMutation::EditTextBlock { page, block, text, style },
+            Edit::DeleteContent { page, index } => DocMutation::DeleteContent { page, index },
+            Edit::AddText { page, text } => DocMutation::AddText { page, text },
+            // An added picture points at an object number in this peer's copy of the file.
+            Edit::UpdateContent { page, index, content: pdfcraft_engine::AddedContent::Text(text) } => DocMutation::UpdateText { page, index, text },
+            Edit::MoveObjects { page, objects, offset } => DocMutation::MoveObjects { page, objects, offset },
+            Edit::ReplaceText { page, quads, text, author, strike, caret } => DocMutation::ReplaceText { page, quads, text, author, strike, caret },
+            Edit::EraseInk { page, index, path, radius } => DocMutation::EraseInk { page, index, path, radius },
+            Edit::AddImage { page, rect, name, bytes } => DocMutation::AddImage { page, rect, name, bytes: bytes.as_ref().clone() },
+            Edit::ReplaceImage { page, index, name, bytes } => DocMutation::ReplaceImage { page, index, name, bytes: bytes.as_ref().clone() },
+            Edit::EditPageImage { page, index, change } => DocMutation::EditPageImage { page, index, change },
             _ => return None,
         })
     }
@@ -259,36 +393,23 @@ pub fn show_share_toolbar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             ToolbarView::Offline => {
                 let has_doc = app.active.is_some();
                 let share_btn = ui.add_enabled(has_doc, egui::Button::new(tl!("Share Document")));
-                if share_btn.clicked() {
-                    if let Some((_, id)) = app.active_ids() {
-                        let filename = app
-                            .session
-                            .get(id)
-                            .map(|d| d.display_name())
-                            .unwrap_or_else(|| "document.pdf".to_string());
-                        let bytes = app
-                            .session
-                            .save_bytes(id)
-                            .map(|b| (*b).clone())
-                            .unwrap_or_else(|_| {
-                                app.session
-                                    .get(id)
-                                    .map(|d| (*d.bytes).clone())
-                                    .unwrap_or_default()
-                            });
-                        if !bytes.is_empty() {
-                            app.begin_share(filename, bytes);
-                        } else {
-                            app.share_toolbar.error = Some(tl!("No document data to share").to_string());
-                        }
+                if share_btn.clicked()
+                    && let Some((_, id)) = app.active_ids()
+                {
+                    let filename = app.session.get(id).map(|d| d.display_name()).unwrap_or_else(|| "document.pdf".to_string());
+                    let bytes = app
+                        .session
+                        .save_bytes(id)
+                        .map(|b| (*b).clone())
+                        .unwrap_or_else(|_| app.session.get(id).map(|d| (*d.bytes).clone()).unwrap_or_default());
+                    if !bytes.is_empty() {
+                        app.begin_share(filename, bytes);
+                    } else {
+                        app.share_toolbar.error = Some(tl!("No document data to share").to_string());
                     }
                 }
 
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.share_toolbar.join_input)
-                        .hint_text("ssync://...")
-                        .desired_width(110.0),
-                );
+                ui.add(egui::TextEdit::singleline(&mut app.share_toolbar.join_input).hint_text("ssync://...").desired_width(110.0));
 
                 let has_input = !app.share_toolbar.join_input.trim().is_empty();
                 if ui.add_enabled(has_input, egui::Button::new(tl!("Join via Link"))).clicked() {
@@ -298,22 +419,20 @@ pub fn show_share_toolbar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
             }
             ToolbarView::Hosting { label } => {
                 ui.label(egui::RichText::new(&label).strong());
-                if ui.button(tl!("Copy Edit Link")).clicked() {
-                    if let Some(link) = app.share_toolbar.edit_link() {
-                        ui.ctx().copy_text(link.to_string());
-                        app.notify(tl!("Edit link copied to clipboard"));
-                    }
+                if ui.button(tl!("Copy Edit Link")).clicked()
+                    && let Some(link) = app.share_toolbar.edit_link()
+                {
+                    ui.ctx().copy_text(link.to_string());
+                    app.notify(tl!("Edit link copied to clipboard"));
                 }
-                if ui.button(tl!("Copy View-Only Link")).clicked() {
-                    if let Some(link) = app.share_toolbar.view_only_link() {
-                        ui.ctx().copy_text(link.to_string());
-                        app.notify(tl!("View-only link copied to clipboard"));
-                    }
+                if ui.button(tl!("Copy View-Only Link")).clicked()
+                    && let Some(link) = app.share_toolbar.view_only_link()
+                {
+                    ui.ctx().copy_text(link.to_string());
+                    app.notify(tl!("View-only link copied to clipboard"));
                 }
-                let stop_button = egui::Button::new(
-                    egui::RichText::new(tl!("Stop Sharing")).color(egui::Color32::WHITE),
-                )
-                .fill(egui::Color32::from_rgb(200, 40, 40));
+                let stop_button = egui::Button::new(egui::RichText::new(tl!("Stop Sharing")).color(egui::Color32::WHITE))
+                    .fill(egui::Color32::from_rgb(200, 40, 40));
                 if ui.add(stop_button).clicked() {
                     if let Some(sync) = &mut app.sync {
                         app.share_toolbar.on_stop(sync);
@@ -331,11 +450,7 @@ pub fn show_share_toolbar(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                 }
             }
             ToolbarView::JoinedViewOnly { label } => {
-                ui.label(
-                    egui::RichText::new(&label)
-                        .color(egui::Color32::from_rgb(220, 160, 40))
-                        .strong(),
-                );
+                ui.label(egui::RichText::new(&label).color(egui::Color32::from_rgb(220, 160, 40)).strong());
                 if ui.button(tl!("Leave")).clicked() {
                     if let Some(sync) = &mut app.sync {
                         app.share_toolbar.on_stop(sync);

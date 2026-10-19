@@ -70,7 +70,7 @@ pub use pdfcraft_xfa::Report as XfaLayout;
 pub use pdfcraft_edit::{EditableObject, MAX_MOVE_OBJECTS, ObjectKind, ObjectTarget};
 
 /// A change to an existing page image.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ImageEdit {
     /// Move and resize it to this box (user space).
     Move([f64; 4]),

@@ -168,10 +168,7 @@ const LOG_MAX_BYTES: usize = 16 * 1024 * 1024;
 impl MutationLog {
     /// `false` once the log is full: a later joiner would miss this edit.
     fn push(&mut self, frame: Vec<u8>) -> bool {
-        if self.overflowed
-            || self.frames.len() >= LOG_MAX_FRAMES
-            || self.bytes.saturating_add(frame.len()) > LOG_MAX_BYTES
-        {
+        if self.overflowed || self.frames.len() >= LOG_MAX_FRAMES || self.bytes.saturating_add(frame.len()) > LOG_MAX_BYTES {
             self.overflowed = true;
             return false;
         }
@@ -201,11 +198,7 @@ pub(crate) struct Worker {
 }
 
 impl Worker {
-    pub(crate) fn new(
-        cfg: SyncConfig,
-        evt_tx: mpsc::UnboundedSender<SyncEvent>,
-        shared: Arc<Shared>,
-    ) -> Self {
+    pub(crate) fn new(cfg: SyncConfig, evt_tx: mpsc::UnboundedSender<SyncEvent>, shared: Arc<Shared>) -> Self {
         Self { cfg, evt_tx, shared, session: None }
     }
 
@@ -272,9 +265,7 @@ impl Worker {
                 Ok(frame) => {
                     if let (Wire::Mutation(_), Some(log)) = (&wire, &s.log) {
                         if !lock(log).push(frame) {
-                            self.report(anyhow!(
-                                "edit history is full: people who join from now on will not get this edit"
-                            ));
+                            self.report(anyhow!("edit history is full: people who join from now on will not get this edit"));
                         }
                     }
                     Ok(())
@@ -290,10 +281,7 @@ impl Worker {
 
     async fn bind(&self, secret: SecretKey, lookup: Option<MemoryLookup>) -> Result<Endpoint> {
         let mut b = if self.cfg.local_only {
-            Endpoint::builder(presets::Minimal)
-                .relay_mode(RelayMode::Disabled)
-                .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-                .map_err(ae)?
+            Endpoint::builder(presets::Minimal).relay_mode(RelayMode::Disabled).bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(ae)?
         } else {
             Endpoint::builder(presets::N0)
         };
@@ -350,18 +338,14 @@ impl Worker {
         }
         let blobs = BlobsProtocol::new(&store, None);
         let gossip = Gossip::builder().max_message_size(crate::MAX_FRAME_BYTES).spawn(endpoint.clone());
-        let router = Router::builder(endpoint.clone())
-            .accept(iroh_blobs::ALPN, blobs)
-            .accept(GOSSIP_ALPN, gossip.clone())
-            .spawn();
+        let router = Router::builder(endpoint.clone()).accept(iroh_blobs::ALPN, blobs).accept(GOSSIP_ALPN, gossip.clone()).spawn();
 
         if !self.cfg.local_only {
             // Give the endpoint a moment to learn its home relay for the ticket.
             let _ = tokio::time::timeout(ONLINE_TIMEOUT, endpoint.online()).await;
         }
         let addr = endpoint.addr();
-        let mut ips: Vec<SocketAddr> =
-            addr.ip_addrs().copied().filter(|a| !a.ip().is_unspecified()).collect();
+        let mut ips: Vec<SocketAddr> = addr.ip_addrs().copied().filter(|a| !a.ip().is_unspecified()).collect();
         if ips.is_empty() {
             ips = endpoint.bound_sockets().into_iter().filter(|a| !a.ip().is_unspecified()).collect();
         }
@@ -375,10 +359,7 @@ impl Worker {
 
         let ticket = SessionTicket::generate(host_addr, *b3.as_bytes(), &filename);
         let keys = Arc::new(Keys::from_ticket(&ticket)?);
-        let topic = gossip
-            .subscribe(TopicId::from_bytes(ticket.gossip_topic_id), vec![])
-            .await
-            .map_err(ae)?;
+        let topic = gossip.subscribe(TopicId::from_bytes(ticket.gossip_topic_id), vec![]).await.map_err(ae)?;
         let (sender, receiver) = topic.split();
         let crdt = Arc::new(Mutex::new(CrdtState::new()));
         let author = *secret.public().as_bytes();
@@ -389,8 +370,7 @@ impl Worker {
 
         *lock(&self.shared.peer_id) = secret.public().to_string();
         self.shared.peers.store(0, Ordering::Relaxed);
-        self.session =
-            Some(Session { router, sender, keys, author, seq, log, crdt, tasks: vec![recv] });
+        self.session = Some(Session { router, sender, keys, author, seq, log, crdt, tasks: vec![recv] });
         Ok(ShareLinks { edit_uri: ticket.to_edit_uri(), view_only_uri: ticket.to_view_only_uri() })
     }
 
@@ -406,14 +386,9 @@ impl Worker {
         let endpoint = self.bind(secret.clone(), Some(lookup)).await?;
 
         let gossip = Gossip::builder().max_message_size(crate::MAX_FRAME_BYTES).spawn(endpoint.clone());
-        let router = Router::builder(endpoint.clone())
-            .accept(GOSSIP_ALPN, gossip.clone())
-            .spawn();
+        let router = Router::builder(endpoint.clone()).accept(GOSSIP_ALPN, gossip.clone()).spawn();
         // Messages sent before the first neighbor connects are queued by gossip.
-        let topic = gossip
-            .subscribe(TopicId::from_bytes(t.gossip_topic_id), vec![host_id])
-            .await
-            .map_err(ae)?;
+        let topic = gossip.subscribe(TopicId::from_bytes(t.gossip_topic_id), vec![host_id]).await.map_err(ae)?;
         let (sender, receiver) = topic.split();
         let crdt = Arc::new(Mutex::new(CrdtState::new()));
         let author = *secret.public().as_bytes();
@@ -458,28 +433,13 @@ impl Worker {
 
         *lock(&self.shared.peer_id) = secret.public().to_string();
         self.shared.peers.store(0, Ordering::Relaxed);
-        self.session = Some(Session {
-            router,
-            sender,
-            keys,
-            author,
-            seq,
-            log: None,
-            crdt,
-            tasks: vec![recv, download],
-        });
+        self.session = Some(Session { router, sender, keys, author, seq, log: None, crdt, tasks: vec![recv, download] });
         Ok(())
     }
 }
 
 /// Seal and broadcast `wire`; returns the sealed frame so the host can keep it in its log.
-async fn send_wire(
-    sender: &GossipSender,
-    keys: &Keys,
-    author: [u8; 32],
-    seq: &AtomicU64,
-    wire: &Wire,
-) -> Result<Vec<u8>> {
+async fn send_wire(sender: &GossipSender, keys: &Keys, author: [u8; 32], seq: &AtomicU64, wire: &Wire) -> Result<Vec<u8>> {
     let n = seq.fetch_add(1, Ordering::Relaxed);
     let frame = keys.seal(author, n, &bincode::serialize(wire)?)?;
     sender.broadcast(Bytes::from(frame.clone())).await.map_err(ae)?;
@@ -506,7 +466,9 @@ impl RecvCtx {
 
     fn on_message(&self, content: &[u8]) {
         // Undecryptable or unauthorized frames are dropped silently.
-        let Ok((from, seq, data)) = self.keys.open(content) else { return };
+        let Ok((from, seq, data)) = self.keys.open(content) else {
+            return;
+        };
         if from == self.author {
             return;
         }
@@ -514,16 +476,12 @@ impl RecvCtx {
         if !lock(&self.guard).accept(from, seq) {
             return;
         }
-        let author_peer_id = PublicKey::from_bytes(&from)
-            .map(|k| k.to_string())
-            .unwrap_or_else(|_| data_encoding::HEXLOWER.encode(&from));
+        let author_peer_id = PublicKey::from_bytes(&from).map(|k| k.to_string()).unwrap_or_else(|_| data_encoding::HEXLOWER.encode(&from));
         match bincode::deserialize::<Wire>(&data) {
             Ok(Wire::Mutation(mutation_bytes)) => {
                 if let Some(log) = &self.log {
                     if !lock(log).push(content.to_vec()) {
-                        self.emit(SyncEvent::Error(
-                            "edit history is full: people who join from now on will not get this edit".into(),
-                        ));
+                        self.emit(SyncEvent::Error("edit history is full: people who join from now on will not get this edit".into()));
                     }
                 }
                 self.emit(SyncEvent::RemoteMutation { author_peer_id, mutation_bytes })
@@ -548,12 +506,14 @@ impl RecvCtx {
         }
         let snapshot = {
             let c = lock(&self.crdt);
-            if c.is_empty() { None } else { c.snapshot().ok() }
+            if c.is_empty() {
+                None
+            } else {
+                c.snapshot().ok()
+            }
         };
         if let Some(s) = snapshot {
-            if let Err(e) =
-                send_wire(&self.sender, &self.keys, self.author, &self.seq, &Wire::Crdt(s)).await
-            {
+            if let Err(e) = send_wire(&self.sender, &self.keys, self.author, &self.seq, &Wire::Crdt(s)).await {
                 self.emit(SyncEvent::Error(format!("{e:#}")));
             }
         }

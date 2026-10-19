@@ -29,14 +29,26 @@ use worker::{Shared, Worker, WorkerCommand};
 pub enum SyncEvent {
     /// Fired on the joiner's machine once the base file (e.g. raw PDF bytes) is
     /// downloaded and verified against the ticket's BLAKE3 hash.
-    BaseDocumentReady { filename: String, bytes: Vec<u8> },
+    BaseDocumentReady {
+        filename: String,
+        bytes: Vec<u8>,
+    },
     /// A remote writer broadcast a mutation. `mutation_bytes` is the `bincode`
     /// encoding of what they passed to [`SyncEngine::broadcast_mutation`].
-    RemoteMutation { author_peer_id: String, mutation_bytes: Vec<u8> },
+    RemoteMutation {
+        author_peer_id: String,
+        mutation_bytes: Vec<u8>,
+    },
     /// A *remote* Loro CRDT delta/snapshot was merged.
-    CrdtUpdated { json_state: String },
-    PeerJoined { peer_id: String },
-    PeerLeft { peer_id: String },
+    CrdtUpdated {
+        json_state: String,
+    },
+    PeerJoined {
+        peer_id: String,
+    },
+    PeerLeft {
+        peer_id: String,
+    },
     Error(String),
 }
 
@@ -111,25 +123,16 @@ impl SyncEngine {
         let (evt_tx, event_rx) = unbounded_channel();
         let shared = Arc::new(Shared::default());
         let worker = Worker::new(cfg, evt_tx, shared.clone());
-        std::thread::Builder::new()
-            .name(format!("simple-sync:{app_namespace}"))
-            .spawn(move || {
-                let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
-                    .worker_threads(2)
-                    .enable_all()
-                    .build()
-                else {
-                    return;
-                };
-                rt.block_on(worker.run(cmd_rx));
-            })?;
+        std::thread::Builder::new().name(format!("simple-sync:{app_namespace}")).spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() else {
+                return;
+            };
+            rt.block_on(worker.run(cmd_rx));
+        })?;
         Ok(Self { cmd_tx, event_rx, shared, role: ShareRole::Offline })
     }
 
-    fn request<T>(
-        &self,
-        make: impl FnOnce(mpsc::Sender<Result<T>>) -> WorkerCommand,
-    ) -> Result<T> {
+    fn request<T>(&self, make: impl FnOnce(mpsc::Sender<Result<T>>) -> WorkerCommand) -> Result<T> {
         let (reply, rx) = mpsc::channel();
         self.cmd_tx.send(make(reply)).map_err(|_| anyhow!("sync worker stopped"))?;
         rx.recv_timeout(REPLY_TIMEOUT).map_err(|_| anyhow!("sync worker did not respond"))?
@@ -145,11 +148,7 @@ impl SyncEngine {
         if self.role != ShareRole::Offline {
             bail!("already sharing or joined; stop first");
         }
-        let links = self.request(|reply| WorkerCommand::Enable {
-            filename: filename.to_string(),
-            bytes: base_bytes,
-            reply,
-        })?;
+        let links = self.request(|reply| WorkerCommand::Enable { filename: filename.to_string(), bytes: base_bytes, reply })?;
         self.role = ShareRole::Hosting;
         Ok(links)
     }
@@ -227,22 +226,15 @@ impl SyncEngine {
         self.ensure_can_write()?;
         let bytes = bincode::serialize(mutation)?;
         if bytes.len() > MAX_MUTATION_BYTES {
-            bail!(
-                "this edit is too large to share live ({} bytes; the limit is {MAX_MUTATION_BYTES})",
-                bytes.len()
-            );
+            bail!("this edit is too large to share live ({} bytes; the limit is {MAX_MUTATION_BYTES})", bytes.len());
         }
-        self.cmd_tx
-            .send(WorkerCommand::Mutation(bytes))
-            .map_err(|_| anyhow!("sync worker stopped"))
+        self.cmd_tx.send(WorkerCommand::Mutation(bytes)).map_err(|_| anyhow!("sync worker stopped"))
     }
 
     /// Set a key in the shared Loro CRDT map and broadcast the delta (writers only).
     pub fn set_shared(&self, key: &str, value: &str) -> Result<()> {
         self.ensure_can_write()?;
-        self.cmd_tx
-            .send(WorkerCommand::CrdtSet { key: key.to_string(), value: value.to_string() })
-            .map_err(|_| anyhow!("sync worker stopped"))
+        self.cmd_tx.send(WorkerCommand::CrdtSet { key: key.to_string(), value: value.to_string() }).map_err(|_| anyhow!("sync worker stopped"))
     }
 
     fn ensure_can_write(&self) -> Result<()> {

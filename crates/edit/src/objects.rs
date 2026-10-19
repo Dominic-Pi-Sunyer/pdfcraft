@@ -14,7 +14,7 @@ const MAX_COORDINATE: f64 = 1e9;
 const MAX_CONTENT_BYTES: usize = 128 * 1024 * 1024;
 
 /// The source inventory of an editable item. Indexes are zero-based within that inventory.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ObjectKind {
     Added,
     Text,
@@ -31,7 +31,7 @@ impl ObjectKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ObjectTarget {
     pub kind: ObjectKind,
     pub index: usize,

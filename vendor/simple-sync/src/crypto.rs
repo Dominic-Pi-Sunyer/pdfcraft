@@ -68,9 +68,8 @@ fn signed_message(author: &[u8; 32], seq: u64, payload: &[u8]) -> Vec<u8> {
 pub fn encrypt(read_key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
     let mut nonce = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut nonce);
-    let ciphertext = ChaCha20Poly1305::new(Key::from_slice(read_key))
-        .encrypt(Nonce::from_slice(&nonce), plaintext)
-        .map_err(|_| anyhow!("encryption failed"))?;
+    let ciphertext =
+        ChaCha20Poly1305::new(Key::from_slice(read_key)).encrypt(Nonce::from_slice(&nonce), plaintext).map_err(|_| anyhow!("encryption failed"))?;
     Ok(bincode::serialize(&SignedEncryptedFrame { nonce, ciphertext })?)
 }
 
@@ -84,13 +83,7 @@ pub fn decrypt(read_key: &[u8; 32], frame: &[u8]) -> Result<Vec<u8>> {
 
 /// Sign `(author || payload)` and encrypt. Fails with `Session is View-Only`
 /// when no signing key is available, before anything touches the network.
-pub fn seal(
-    read_key: &[u8; 32],
-    signing_key: Option<&SigningKey>,
-    author: [u8; 32],
-    seq: u64,
-    payload: &[u8],
-) -> Result<Vec<u8>> {
+pub fn seal(read_key: &[u8; 32], signing_key: Option<&SigningKey>, author: [u8; 32], seq: u64, payload: &[u8]) -> Result<Vec<u8>> {
     let sk = signing_key.ok_or_else(|| anyhow!("Session is View-Only"))?;
     let signature = sk.sign(&signed_message(&author, seq, payload)).to_bytes().to_vec();
     let inner = SignedPayload { author, seq, payload: payload.to_vec(), signature };
@@ -99,11 +92,7 @@ pub fn seal(
 
 /// Decrypt, then verify the write signature against the ticket's verifying key.
 /// Returns `(author, seq, payload)`; any failure means the frame must be dropped.
-pub fn open(
-    read_key: &[u8; 32],
-    verifying_key: &VerifyingKey,
-    frame: &[u8],
-) -> Result<([u8; 32], u64, Vec<u8>)> {
+pub fn open(read_key: &[u8; 32], verifying_key: &VerifyingKey, frame: &[u8]) -> Result<([u8; 32], u64, Vec<u8>)> {
     let inner: SignedPayload = bincode::deserialize(&decrypt(read_key, frame)?)?;
     let sig: [u8; 64] = match inner.signature.as_slice().try_into() {
         Ok(s) => s,

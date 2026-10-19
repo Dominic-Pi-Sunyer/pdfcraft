@@ -85,10 +85,7 @@ impl PdfCraftApp {
             return self.combine_can_undo(spec.needs == commands::Needs::Undo);
         }
         if !self.local_editing_allowed()
-            && !matches!(
-                spec.needs,
-                commands::Needs::Nothing | commands::Needs::Document | commands::Needs::Copying | commands::Needs::TwoPageView
-            )
+            && !matches!(spec.needs, commands::Needs::Nothing | commands::Needs::Document | commands::Needs::Copying | commands::Needs::TwoPageView)
         {
             return false;
         }

@@ -60,7 +60,7 @@ impl PdfCraftApp {
                     None => {}
                 }
             }
-            return ok;
+            ok
         }
         #[cfg(target_arch = "wasm32")]
         self.apply_edit_internal(edit)

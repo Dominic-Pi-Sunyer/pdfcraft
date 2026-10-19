@@ -106,19 +106,13 @@ impl SessionTicket {
     }
 
     pub fn from_uri(uri: &str) -> Result<Self> {
-        let body = uri
-            .trim()
-            .strip_prefix(SCHEME)
-            .ok_or_else(|| anyhow!("ticket must start with `{SCHEME}`"))?;
-        let bytes = BASE64URL_NOPAD
-            .decode(body.as_bytes())
-            .map_err(|e| anyhow!("ticket is not valid base64url: {e}"))?;
+        let body = uri.trim().strip_prefix(SCHEME).ok_or_else(|| anyhow!("ticket must start with `{SCHEME}`"))?;
+        let bytes = BASE64URL_NOPAD.decode(body.as_bytes()).map_err(|e| anyhow!("ticket is not valid base64url: {e}"))?;
         let w: WireTicket = bincode::deserialize(&bytes).context("malformed ticket")?;
         if w.version != VERSION {
             bail!("unsupported ticket version {}", w.version);
         }
-        VerifyingKey::from_bytes(&w.write_verifying_key)
-            .map_err(|_| anyhow!("ticket has an invalid write verifying key"))?;
+        VerifyingKey::from_bytes(&w.write_verifying_key).map_err(|_| anyhow!("ticket has an invalid write verifying key"))?;
         if let Some(sk) = &w.write_signing_key {
             if SigningKey::from_bytes(sk).verifying_key().to_bytes() != w.write_verifying_key {
                 bail!("ticket signing key does not match its verifying key");

@@ -83,11 +83,7 @@ fn test_p2p_share_mode_transfer_and_edit_sync() {
         std::thread::sleep(Duration::from_millis(10));
     }
 
-    assert_eq!(
-        joiner.active_document().unwrap().info.pages[0].rotation,
-        90,
-        "joiner applied remote rotation mutation"
-    );
+    assert_eq!(joiner.active_document().unwrap().info.pages[0].rotation, 90, "joiner applied remote rotation mutation");
 
     // Editor joiner can also broadcast a mutation back to host
     let editor_mutation = DocMutation::RotatePages { pages: vec![1], degrees: 180 };
@@ -231,16 +227,8 @@ fn test_p2p_annotation_edits_sync() {
 
     let shape = Shape::Rectangle { rect: [20.0, 20.0, 120.0, 90.0] };
     let style = Style::default_for(&shape);
-    assert!(host.apply_edit(Edit::AddAnnotation(NewAnnotation {
-        page: 0,
-        shape,
-        style,
-        contents: "check this".into(),
-        author: "Host".into(),
-    })));
-    pump_until(&mut host, &mut peer, "annotation added", &|p| {
-        p.active_document().is_some_and(|d| d.info.annotations.len() == 1)
-    });
+    assert!(host.apply_edit(Edit::AddAnnotation(NewAnnotation { page: 0, shape, style, contents: "check this".into(), author: "Host".into() })));
+    pump_until(&mut host, &mut peer, "annotation added", &|p| p.active_document().is_some_and(|d| d.info.annotations.len() == 1));
     assert_eq!(peer.active_document().unwrap().info.annotations[0].contents.as_deref(), Some("check this"));
 
     // The note keeps the position it was placed at (it must not be reset by the sharing path).
@@ -250,14 +238,10 @@ fn test_p2p_annotation_edits_sync() {
     assert!(host.apply_edit(Edit::MoveAnnotation { page: 0, index: 0, dx: 30.0, dy: 0.0 }));
     let moved = host.active_document().unwrap().info.annotations[0].rect;
     assert_ne!(moved, placed);
-    pump_until(&mut host, &mut peer, "annotation moved", &|p| {
-        p.active_document().is_some_and(|d| d.info.annotations[0].rect == moved)
-    });
+    pump_until(&mut host, &mut peer, "annotation moved", &|p| p.active_document().is_some_and(|d| d.info.annotations[0].rect == moved));
 
     assert!(host.apply_edit(Edit::DeleteAnnotation { page: 0, index: 0 }));
-    pump_until(&mut host, &mut peer, "annotation deleted", &|p| {
-        p.active_document().is_some_and(|d| d.info.annotations.is_empty())
-    });
+    pump_until(&mut host, &mut peer, "annotation deleted", &|p| p.active_document().is_some_and(|d| d.info.annotations.is_empty()));
 }
 
 /// A peer's edit goes to the shared document even when another tab is showing, and an edit made
@@ -304,4 +288,89 @@ fn test_p2p_edits_follow_the_shared_document_not_the_active_tab() {
     // The edit landed on the shared document, not on the tab the peer had in front.
     assert_eq!(peer.shared_document().unwrap().info.pages[1].rotation, 0, "the scratch edit was not shared");
     assert_eq!(peer.active_document().unwrap().info.pages[0].rotation, 0, "the other tab is untouched");
+}
+
+fn connected_pair(tag: &str, pdf: Vec<u8>) -> (PdfCraftApp, PdfCraftApp) {
+    let mut host = PdfCraftApp::new();
+    host.sync = Some(SyncEngine::with_config(&format!("{tag}-host"), SyncConfig::local_only()).unwrap());
+    let mut peer = PdfCraftApp::new();
+    peer.sync = Some(SyncEngine::with_config(&format!("{tag}-peer"), SyncConfig::local_only()).unwrap());
+    host.open_bytes("doc.pdf", None, pdf.clone()).unwrap();
+    let links = host.enable_share_mode("doc.pdf", pdf).unwrap();
+    peer.join_session(&links.edit_uri).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while peer.shared_document().is_none() {
+        host.pump_sync(None);
+        peer.pump_sync(None);
+        assert!(Instant::now() < deadline, "peer never received the document");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    (host, peer)
+}
+
+fn pump_until(host: &mut PdfCraftApp, peer: &mut PdfCraftApp, what: &str, done: impl Fn(&PdfCraftApp) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !done(peer) {
+        host.pump_sync(None);
+        peer.pump_sync(None);
+        assert!(Instant::now() < deadline, "timed out: {what}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn first_line(app: &PdfCraftApp) -> Option<String> {
+    app.shared_document()?.text_lines(0).first().map(|l| l.text.clone())
+}
+
+/// Rewriting a line of the page's own text shows up on the other computer.
+#[test]
+fn test_p2p_text_line_edit_syncs() {
+    use pdfcraft_engine::Edit;
+    let (mut host, mut peer) = connected_pair("text-line", fixture(1));
+    assert_eq!(first_line(&peer).as_deref(), Some("Page 1"));
+    assert!(host.apply_edit(Edit::EditTextLine { page: 0, line: 0, text: "Revised heading".into() }));
+    assert_eq!(first_line(&host).as_deref(), Some("Revised heading"));
+    pump_until(&mut host, &mut peer, "text edit", |p| first_line(p).as_deref() == Some("Revised heading"));
+}
+
+/// Deleting a paragraph of the page's own text on one computer removes it on the other: the editor
+/// does it by rewriting the paragraph to nothing.
+#[test]
+fn test_p2p_deleting_text_syncs() {
+    use pdfcraft_engine::{BlockStyle, Edit};
+    let (mut host, mut peer) = connected_pair("text-del", fixture(1));
+    let before = peer.shared_document().unwrap().text_lines(0).len();
+    assert!(before >= 1);
+    assert!(host.apply_edit(Edit::EditTextBlock { page: 0, block: 0, text: String::new(), style: BlockStyle::default() }));
+    let after_host = host.shared_document().unwrap().text_lines(0).len();
+    assert_eq!(after_host, before - 1, "the host's text is gone");
+    pump_until(&mut host, &mut peer, "text deleted", |p| p.shared_document().is_some_and(|d| d.text_lines(0).len() == after_host));
+}
+
+/// Removing text that was added (Delete content) reaches the other computer too.
+#[test]
+fn test_p2p_deleting_added_content_syncs() {
+    use pdfcraft_engine::{AddedText, Edit};
+    let (mut host, mut peer) = connected_pair("content-del", fixture(1));
+    let text = AddedText { rect: [20.0, 200.0, 180.0, 230.0], text: "Temporary".into(), ..Default::default() };
+    assert!(host.apply_edit(Edit::AddText { page: 0, text }));
+    pump_until(&mut host, &mut peer, "added", |p| p.shared_document().is_some_and(|d| d.text_lines(0).iter().any(|l| l.text.contains("Temporary"))));
+    assert!(host.apply_edit(Edit::DeleteContent { page: 0, index: 0 }));
+    pump_until(&mut host, &mut peer, "removed", |p| {
+        p.shared_document().is_some_and(|d| !d.text_lines(0).iter().any(|l| l.text.contains("Temporary")))
+    });
+}
+
+/// Text added to the page appears on the other computer.
+#[test]
+fn test_p2p_added_text_syncs() {
+    use pdfcraft_engine::{AddedText, Edit};
+    let (mut host, mut peer) = connected_pair("text-add", fixture(1));
+    let before = peer.shared_document().unwrap().text_lines(0).len();
+    let text = AddedText { rect: [20.0, 200.0, 180.0, 230.0], text: "Added by host".into(), ..Default::default() };
+    assert!(host.apply_edit(Edit::AddText { page: 0, text }));
+    pump_until(&mut host, &mut peer, "added text", |p| {
+        p.shared_document().is_some_and(|d| d.text_lines(0).iter().any(|l| l.text.contains("Added by host")))
+    });
+    assert_eq!(peer.shared_document().unwrap().text_lines(0).len(), before + 1);
 }

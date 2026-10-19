@@ -83,8 +83,6 @@ pub use edit_text_ui::CropMode;
 mod editing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_watch;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod share;
 mod files;
 pub mod fill_sign;
 mod fling;
@@ -103,6 +101,8 @@ mod panels;
 mod pickers;
 pub mod prepare;
 mod print_ui;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod share;
 mod signature_drag;
 pub mod units;
 mod web_print;
@@ -2018,6 +2018,8 @@ impl PdfCraftApp {
 
     /// Poll the P2P sync engine for incoming document blobs and peer mutations.
     pub fn pump_sync(&mut self, ctx: Option<&egui::Context>) {
+        #[cfg(target_arch = "wasm32")]
+        let _ = ctx;
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.poll_share_start(ctx);
@@ -2030,15 +2032,13 @@ impl PdfCraftApp {
             let repainted = !events.is_empty();
             for ev in events {
                 match ev {
-                    simple_sync::SyncEvent::BaseDocumentReady { filename, bytes } => {
-                        match self.open_bytes(&filename, None, bytes) {
-                            Ok(()) => self.shared_doc = self.active_ids().map(|(_, id)| id),
-                            Err(e) => {
-                                log::warn!("couldn't open shared document {filename}: {e}");
-                                self.share_toolbar.error = Some(format!("open document: {e}"));
-                            }
+                    simple_sync::SyncEvent::BaseDocumentReady { filename, bytes } => match self.open_bytes(&filename, None, bytes) {
+                        Ok(()) => self.shared_doc = self.active_ids().map(|(_, id)| id),
+                        Err(e) => {
+                            log::warn!("couldn't open shared document {filename}: {e}");
+                            self.share_toolbar.error = Some(format!("open document: {e}"));
                         }
-                    }
+                    },
                     simple_sync::SyncEvent::RemoteMutation { mutation_bytes, .. } => {
                         match bincode::deserialize::<crate::share::DocMutation>(&mutation_bytes) {
                             Ok(mutation) => {
@@ -2058,10 +2058,8 @@ impl PdfCraftApp {
                     | simple_sync::SyncEvent::CrdtUpdated { .. } => {}
                 }
             }
-            if repainted {
-                if let Some(ctx) = ctx {
-                    ctx.request_repaint();
-                }
+            if repainted && let Some(ctx) = ctx {
+                ctx.request_repaint();
             }
         }
     }

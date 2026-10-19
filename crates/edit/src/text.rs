@@ -1935,7 +1935,7 @@ pub fn replace_block(doc: &mut Document, page: usize, block: usize, text: &str) 
 }
 
 /// Formatting for a rewritten paragraph (`None` keeps the paragraph's own).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BlockStyle {
     /// Disjoint UTF-8 ranges in the replacement, each preserving unspecified source style.
     pub ranges: Vec<RangeStyle>,
@@ -1966,7 +1966,7 @@ pub struct BlockStyle {
     pub cover: Option<[f64; 3]>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RangeStyle {
     pub range: std::ops::Range<usize>,
     pub family: Option<(crate::added::Family, bool, bool)>,
