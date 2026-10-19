@@ -39,7 +39,59 @@ pub enum SaveTarget {
 
 impl PdfCraftApp {
     /// Apply an edit to the active document. Returns `true` on success; failures are shown.
+    /// If Share Mode is active, mutations are broadcast to peers; in View-Only mode edits are refused.
     pub fn apply_edit(&mut self, edit: Edit) -> bool {
+        if !self.local_editing_allowed() {
+            log::warn!("editing refused: session is view-only");
+            return false;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Apply the edit exactly as given; the serialized form is only what peers receive.
+            let mutation = crate::share::DocMutation::from_edit(&edit);
+            let ok = self.apply_edit_internal(edit);
+            if ok && let Some(mutation) = mutation {
+                self.broadcast_mutation(&mutation);
+            }
+            return ok;
+        }
+        #[cfg(target_arch = "wasm32")]
+        self.apply_edit_internal(edit)
+    }
+
+    /// User-initiated mutation: apply locally and broadcast to connected peers.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn apply_local_mutation(&mut self, mutation: crate::share::DocMutation) -> bool {
+        if !self.local_editing_allowed() {
+            log::warn!("local mutation refused: session is view-only");
+            return false;
+        }
+        let ok = self.apply_edit_internal(mutation.to_edit());
+        if ok {
+            self.broadcast_mutation(&mutation);
+        }
+        ok
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn broadcast_mutation(&mut self, mutation: &crate::share::DocMutation) {
+        if let Some(sync) = &self.sync
+            && sync.role() != simple_sync::ShareRole::Offline
+            && let Err(e) = sync.broadcast_mutation(mutation)
+        {
+            log::warn!("broadcast mutation failed: {e}");
+            self.share_toolbar.error = Some(format!("broadcast: {e}"));
+        }
+    }
+
+    /// Peer-initiated mutation: apply locally WITHOUT broadcasting (prevents echo loops).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn apply_remote_mutation(&mut self, mutation: crate::share::DocMutation) -> bool {
+        let edit = mutation.to_edit();
+        self.apply_edit_internal(edit)
+    }
+
+    pub(crate) fn apply_edit_internal(&mut self, edit: Edit) -> bool {
         let Some((i, id)) = self.active_ids() else { return false };
         let label = edit.label();
         let (form_before, page_count_before, had_xfa) = if let Some(d) = self.session.get(id) {

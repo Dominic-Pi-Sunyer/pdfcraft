@@ -1234,10 +1234,11 @@ fn undo_and_redo_restore_the_combine_list() {
     assert_eq!(combine_names(&h), ["a.pdf", "b.pdf", "c.pdf"]);
     // A page range typed in is one step.
     h.state_mut().combine_draft[0].range.clear();
-    let field = h.get_all_by_role(Role::TextInput).next().unwrap();
+    // The first text input is Share Mode's "Join via Link" field in the mode bar; the page range is next.
+    let field = h.get_all_by_role(Role::TextInput).nth(1).unwrap();
     field.focus();
     h.run_steps(1);
-    h.get_all_by_role(Role::TextInput).next().unwrap().type_text("1");
+    h.get_all_by_role(Role::TextInput).nth(1).unwrap().type_text("1");
     h.run_steps(2);
     assert_eq!(h.state().combine_draft[0].range, "1");
     h.key_press_modifiers(Modifiers::COMMAND, Key::Z);

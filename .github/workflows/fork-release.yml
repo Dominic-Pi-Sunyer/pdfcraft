@@ -1,0 +1,140 @@
+name: Fork release
+
+# Self-contained release for a fork: builds the macOS DMG and the Windows MSI + portable zip with the
+# repo's own packaging scripts and attaches them to a GitHub Release. It needs no secrets: signing
+# and notarization are skipped with a warning when their secrets are absent (packaging/macos/package.sh,
+# packaging/windows/sign.ps1), so the artifacts are unsigned.
+#
+# Release:  git tag v0.8.1 && git push origin v0.8.1
+# Dry run:  Actions > Fork release > Run workflow (builds and uploads artifacts, publishes nothing
+#           unless "publish" is ticked).
+#
+# The upstream release.yml (push to `release`) calls an org-private reusable workflow and org
+# secrets, so it only works in storytold/pdfcraft; this one is the fork's route.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the artifacts, e.g. 0.8.1-rc.1 (empty: Cargo.toml)"
+        type: string
+        default: ""
+      publish:
+        description: "Create a GitHub Release from this run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: v
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          v="$INPUT_VERSION"
+          if [ -z "$v" ] && [ "$REF_TYPE" = tag ]; then v="${REF_NAME#v}"; fi
+          # Letters, digits, dots and dashes only: the value reaches file names and the MSI version.
+          case "$v" in
+            *[!A-Za-z0-9.-]*) echo "bad version: $v" >&2; exit 1 ;;
+          esac
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+
+  macos:
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup show
+          rustup target add aarch64-apple-darwin
+      - name: Package DMG (Apple silicon)
+        env:
+          VERSION_OVERRIDE: ${{ needs.version.outputs.version }}
+        run: |
+          if [ -n "$VERSION_OVERRIDE" ]; then export PDFCRAFT_VERSION="$VERSION_OVERRIDE"; fi
+          bash packaging/macos/package.sh --arch aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/release/*
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        shell: pwsh
+        run: |
+          rustup show
+          rustup target add x86_64-pc-windows-msvc
+      - name: Install WiX v5
+        shell: pwsh
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Package MSI and portable zip (x64)
+        shell: pwsh
+        env:
+          VERSION_OVERRIDE: ${{ needs.version.outputs.version }}
+        run: |
+          if ($env:VERSION_OVERRIDE) { $env:PDFCRAFT_VERSION = $env:VERSION_OVERRIDE }
+          pwsh packaging/windows/package.ps1 -Arch x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/release/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, macos, windows]
+    if: github.ref_type == 'tag' || inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        working-directory: assets
+        run: sha256sum * >SHA256SUMS.txt
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          flags=(--generate-notes --title "PdfCraft $VERSION")
+          case "$VERSION" in *-*) flags+=(--prerelease) ;; esac
+          if [ "$REF_TYPE" = tag ]; then
+            tag="$REF_NAME"
+          else
+            # A manual run has no tag: create it on this commit.
+            flags+=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$tag" assets/* --repo "$REPO" "${flags[@]}"

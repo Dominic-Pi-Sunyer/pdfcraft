@@ -83,6 +83,8 @@ pub use edit_text_ui::CropMode;
 mod editing;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod file_watch;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod share;
 mod files;
 pub mod fill_sign;
 mod fling;
@@ -580,6 +582,10 @@ pub struct PdfCraftApp {
     #[cfg(not(target_arch = "wasm32"))]
     open_worker: Option<open_worker::OpenWorker>,
     #[cfg(not(target_arch = "wasm32"))]
+    pub sync: Option<simple_sync::SyncEngine>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub share_toolbar: share::ShareToolbar,
+    #[cfg(not(target_arch = "wasm32"))]
     pending_opens: Vec<PendingOpen>,
     #[cfg(not(target_arch = "wasm32"))]
     next_open_token: u64,
@@ -938,6 +944,10 @@ impl PdfCraftApp {
             watch: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]
             open_worker: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            sync: simple_sync::SyncEngine::new("pdfcraft").ok(),
+            #[cfg(not(target_arch = "wasm32"))]
+            share_toolbar: share::ShareToolbar::new(),
             #[cfg(not(target_arch = "wasm32"))]
             pending_opens: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1995,6 +2005,102 @@ impl PdfCraftApp {
         self.notify(i18n::fmt(tl!(template), args));
     }
 
+    /// Poll the P2P sync engine for incoming document blobs and peer mutations.
+    pub fn pump_sync(&mut self, ctx: Option<&egui::Context>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut events = Vec::new();
+            if let Some(sync) = &mut self.sync {
+                while let Some(ev) = sync.poll() {
+                    events.push(ev);
+                }
+            }
+            let repainted = !events.is_empty();
+            for ev in events {
+                match ev {
+                    simple_sync::SyncEvent::BaseDocumentReady { filename, bytes } => {
+                        if let Err(e) = self.open_bytes(&filename, None, bytes) {
+                            log::warn!("couldn't open shared document {filename}: {e}");
+                            self.share_toolbar.error = Some(format!("open document: {e}"));
+                        }
+                    }
+                    simple_sync::SyncEvent::RemoteMutation { mutation_bytes, .. } => {
+                        match bincode::deserialize::<crate::share::DocMutation>(&mutation_bytes) {
+                            Ok(mutation) => {
+                                self.apply_remote_mutation(mutation);
+                            }
+                            Err(e) => {
+                                log::warn!("bad remote mutation: {e}");
+                                self.share_toolbar.error = Some(format!("bad edit: {e}"));
+                            }
+                        }
+                    }
+                    simple_sync::SyncEvent::Error(msg) => {
+                        self.share_toolbar.error = Some(msg);
+                    }
+                    simple_sync::SyncEvent::PeerJoined { .. }
+                    | simple_sync::SyncEvent::PeerLeft { .. }
+                    | simple_sync::SyncEvent::CrdtUpdated { .. } => {}
+                }
+            }
+            if repainted {
+                if let Some(ctx) = ctx {
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
+
+    /// Whether local edits are allowed (false if in a View-Only P2P Share session).
+    pub fn local_editing_allowed(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(sync) = &self.sync {
+            return sync.role() != simple_sync::ShareRole::JoinedViewOnly;
+        }
+        true
+    }
+
+    /// Current Share Mode role.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn share_role(&self) -> simple_sync::ShareRole {
+        self.sync.as_ref().map(|s| s.role()).unwrap_or(simple_sync::ShareRole::Offline)
+    }
+
+    /// Enable Share Mode on the current document bytes.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn enable_share_mode(&mut self, filename: &str, base_bytes: Vec<u8>) -> Result<simple_sync::ShareLinks, String> {
+        let sync = self.sync.as_mut().ok_or_else(|| "P2P sync is unavailable".to_string())?;
+        let links = sync.enable_share_mode(filename, base_bytes).map_err(|e| e.to_string())?;
+        self.share_toolbar.links = Some(links.clone());
+        self.share_toolbar.error = None;
+        Ok(links)
+    }
+
+    /// Disable Share Mode (the kill switch or leaving).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn disable_share_mode(&mut self) -> Result<(), String> {
+        let sync = self.sync.as_mut().ok_or_else(|| "P2P sync is unavailable".to_string())?;
+        sync.disable_share_mode().map_err(|e| e.to_string())?;
+        self.share_toolbar.links = None;
+        self.share_toolbar.error = None;
+        Ok(())
+    }
+
+    /// Join a Share Mode session from an `ssync://` ticket URI.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn join_session(&mut self, ticket: &str) -> Result<simple_sync::ShareRole, String> {
+        let sync = self.sync.as_mut().ok_or_else(|| "P2P sync is unavailable".to_string())?;
+        let role = sync.join_via_ticket(ticket).map_err(|e| e.to_string())?;
+        self.share_toolbar.join_input.clear();
+        self.share_toolbar.error = None;
+        Ok(role)
+    }
+
+    /// The active open document, if any.
+    pub fn active_document(&self) -> Option<&pdfcraft_engine::Document> {
+        self.active_ids().and_then(|(_, id)| self.session.get(id))
+    }
+
     pub fn set_theme_preference(&mut self, preference: ThemePreference) {
         self.theme_preference = preference;
         if let Some(ctx) = self.ctx.clone() {
@@ -3040,6 +3146,7 @@ impl eframe::App for PdfCraftApp {
         }
         self.poll_updates();
         self.poll_print();
+        self.pump_sync(Some(ctx));
         // Shortcuts deferred last frame: the text field has taken that frame's typing since.
         let deferred = std::mem::take(&mut self.deferred_commands);
         self.shortcuts(ctx);
